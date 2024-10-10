@@ -4,7 +4,7 @@ import geomproc
 import numpy as np
 import random
 
-NUM_SAMPLES = 100 # used during ransac sampling
+NUM_SAMPLES = 200 # used during ransac sampling
 NUM_FULL_SAMPLES = 1000 # used during point descriptor calculation
 DESC_FILTER_TARGET = 20
 
@@ -28,6 +28,16 @@ def create_local_basis(points):
     transform = np.column_stack((basis1, norm, basis2))
     return transform
 
+def get_best_n_matches(target, descriptors, n=DESC_FILTER_TARGET):
+    # descriptors is shape (n, NUM_BINS)
+    # target is (1, NUM_BINS)
+    # find top n results
+    target = target[:, None].T # make row vec
+    
+    diff = descriptors - target
+    error = np.linalg.norm(diff, axis=1)
+    return np.argpartition(error, n)[:n] # return UNSORTED n smallest error indices
+
 
 def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples):
     # create NUM_SAMPLES spin images to act as our ransac point pool
@@ -39,50 +49,31 @@ def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples):
     # select three candidates and their corresponding best matches
     candidate_pairs = []
     for i in range(3):
-        ix = random.randint(0, desc1.shape[0])
-        matches = geomproc.best_match([desc1[ix]], desc2)
-        matches, _ = geomproc.filter_correspondences(corr=matches[:,:2], dist=full_matches[:, 2], keep=DESC_FILTER_TARGET/NUM_SAMPLES)
+        target_ix = random.randint(0, len(desc1)-1)
+        target = desc1[target_ix]
+        matches = get_best_n_matches(target, desc2, DESC_FILTER_TARGET)
+        candidate_ix = random.randint(0, matches.shape[0]-1)
+        candidate_pairs.append([target_ix, matches[candidate_ix], 0])
 
+    # target_points = (pc1_samples.point[candidate_pairs[0][0]], 
+    #                       pc1_samples.point[candidate_pairs[1][0]],
+    #                       pc1_samples.point[candidate_pairs[2][0]])
+    # source_points = (pc2_samples.point[candidate_pairs[0][1]], 
+    #                  pc2_samples.point[candidate_pairs[1][1]],
+    #                  pc2_samples.point[candidate_pairs[2][1]])
 
-    full_matches = geomproc.best_match(desc1, desc2)
-    [matches, distances] = geomproc.filter_correspondences(corr=full_matches[:,:2], dist=full_matches[:, 2], keep=DESC_FILTER_TARGET/NUM_SAMPLES)
-    matches = np.hstack((matches, np.zeros((matches.shape[0], 1))))
-    matches = np.array(matches, dtype=np.int_)
-    print(matches)
+    # # C = AB-1
+    # A = create_local_basis(target_points)
+    # B = create_local_basis(source_points)
 
-    for match in sampled_matches:
-        print(pc1_samples.normal[match[0]], pc1_samples.normal[match[1]])
-
-    [rot, trans] = geomproc.transformation_from_correspondences(pc1_samples, pc2_samples, matches)
-    # return rot, trans
-
-    # sample the "same" 3 points from each pointcloud
-    # Derive a transformation from the point match
-    sample_indices = np.random.randint(matches.shape[0], size=(3,))
-    sampled_matches = (matches[sample_indices[0]], matches[sample_indices[1]], matches[sample_indices[2]])
-    print(sampled_matches)
-    for match in sampled_matches:
-        print(pc1_samples.normal[match[0]], pc1_samples.normal[match[1]])
-    exit(0)
-
-    destination_points = (pc1_samples.point[sampled_matches[0][0]], 
-                          pc1_samples.point[sampled_matches[1][0]],
-                          pc1_samples.point[sampled_matches[2][0]])
-    source_points = (pc2_samples.point[sampled_matches[0][1]], 
-                     pc2_samples.point[sampled_matches[1][1]],
-                     pc2_samples.point[sampled_matches[2][1]])
-
-    # C = AB-1
-    A = create_local_basis(destination_points)
-    B = create_local_basis(source_points)
-
-    A = np.hstack(A, np.array([0, 0, ]))
-
-    C, error = np.linalg.lstsq(A, B, rcond=None)[:2]
-    return C
+    # C, error = np.linalg.lstsq(A, B, rcond=None)[:2]
+    print(candidate_pairs)
+    rot, trans = geomproc.transformation_from_correspondences(pc1_samples, pc2_samples, np.array(candidate_pairs))
+    return rot, trans
 
 
 def main():
+
     rot = np.identity(3)
     # trans = np.array([0.5, 0.5, 0.5]).reshape((3, 1))
     trans = np.zeros((3, 1))
