@@ -4,9 +4,9 @@ import geomproc
 import numpy as np
 import random
 
-NUM_SAMPLES = 100 # used during ransac sampling
-NUM_FULL_SAMPLES = 1000 # used during point descriptor calculation
-DESC_FILTER_TARGET = 5
+NUM_SAMPLES = 200 # used during ransac sampling
+NUM_FULL_SAMPLES = 5000 # used during point descriptor calculation
+DESC_FILTER_TARGET = 10
 RANSAC_ITERATIONS = 1000
 EPSILON =0.1
 
@@ -43,17 +43,40 @@ def create_local_basis(points):
     transform = np.column_stack((basis1, norm, basis2))
     return transform
 
-def get_best_n_matches(target, descriptors, n=DESC_FILTER_TARGET):
-    # descriptors is shape (n, NUM_BINS)
-    # target is (1, NUM_BINS)
-    # find top n results
+def estimate_transformation(A, B):
+    # Compute the centroids
+    centroid_A = np.mean(A, axis=1)
+    centroid_B = np.mean(B, axis=1)
+
+    # Center the points by subtracting the centroids
+    A_centered = A - centroid_A[:, np.newaxis]
+    B_centered = B - centroid_B[:, np.newaxis]
+
+    # Compute the covariance matrix H
+    H = B_centered @ A_centered.T
+
+    # Perform SVD
+    U, S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+
+    # Ensure a proper rotation matrix by correcting for reflection
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = Vt.T @ U.T
+
+    # Compute the translation vector
+    t = centroid_A - R @ centroid_B
+    # print(R, t)
+
+    return R, t[:, None]
+
+
+def get_best_n_matches(target, descriptors, n=DESC_FILTER_TARGET, target_ix=0):
     target = target[:, None].T # make row vec
     diff = descriptors - target
     error = np.linalg.norm(diff, axis=1)
     # lowest_n_indices = np.argpartition(error, n)[:n] # return UNSORTED n smallest error indices
     sorted_indices = np.argsort(error)
-    print(sorted_indices)
-    exit(0)
     return sorted_indices[:n]
 
 def compute_descriptors(pc1_full, pc1_samples, pc2_full, pc2_samples):
@@ -67,14 +90,15 @@ def compute_descriptors(pc1_full, pc1_samples, pc2_full, pc2_samples):
 def get_candidate_pairs(desc1, desc2):
     # select three candidates and their corresponding best matches
     candidate_pairs = []
-    for i in range(10):
+    for i in range(3):
         target_ix = random.randint(0, len(desc1)-1)
         target = desc1[target_ix]
-        print(target_ix)
-        matches = get_best_n_matches(target, desc2, DESC_FILTER_TARGET)
+        # print(target_ix)
+        matches = get_best_n_matches(target, desc2, DESC_FILTER_TARGET, target_ix)
         candidate_ix = random.randint(0, matches.shape[0]-1)
         candidate_pairs.append([target_ix, matches[candidate_ix], 0])
-
+        # print(np.linalg.norm(desc1[target_ix] - desc2[matches[candidate_ix]]))
+    # exit(0)
     return np.array(candidate_pairs)
 
 def compute_errors(originalpc, transformed_points):
@@ -95,15 +119,8 @@ def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples, iterations=RANSAC
         if i % 10 == 0:
             print(i)
         candidate_pairs = get_candidate_pairs(desc1, desc2)
-        # print(candidate_pairs)
-        exit(0)
         rot, trans = geomproc.transformation_from_correspondences(pc1_samples, pc2_samples, candidate_pairs)
         transformed_points = geomproc.apply_transformation(pc2_samples.point, rot, trans)
-        # save_points(pc1_samples.point[candidate_pairs[:, 0]],
-        #             pc2_samples.point[candidate_pairs[:, 1]],
-        #             transformed_points[candidate_pairs[:, 1]])
-        # exit(0)
-
         errors = compute_errors(pc1_samples, transformed_points)
         inlier_indices = np.where(errors[:,2] < EPSILON)[0]
         if inlier_indices.shape[0] > best_inlier_count:
@@ -123,9 +140,9 @@ def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples, iterations=RANSAC
 def main():
 
     # rot = np.identity(3)
-    # rot, trans = random_transform()
-    rot = np.identity(3)
-    trans = np.array([5, 0, 0])[:, None]
+    rot, trans = random_transform()
+    # rot = np.identity(3)
+    # trans = np.array([5, 0, 0])[:, None]
 
     mesh1 = geomproc.load("../GeomProc/meshes/bunny.obj")
     mesh1.normalize()
@@ -142,8 +159,8 @@ def main():
     pc1_samples = mesh1.sample(NUM_SAMPLES)
     pc2         = mesh2.sample(NUM_FULL_SAMPLES)
     pc2_samples = mesh2.sample(NUM_SAMPLES)
-    pc2 = pc1.copy()
-    pc2_samples = pc2.copy()
+    # pc2 = pc1.copy()
+    # pc2_samples = pc1_samples.copy()
 
 
     align_rot, align_trans = ransac_align(pc1, pc1_samples, pc2, pc2_samples)
