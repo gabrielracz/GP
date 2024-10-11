@@ -4,9 +4,11 @@ import geomproc
 import numpy as np
 import random
 
-NUM_SAMPLES = 200 # used during ransac sampling
+NUM_SAMPLES = 300 # used during ransac sampling
 NUM_FULL_SAMPLES = 1000 # used during point descriptor calculation
 DESC_FILTER_TARGET = 20
+RANSAC_ITERATIONS = 50
+EPSILON =0.01
 
 def normalize(v):
     norm = np.linalg.norm(v)
@@ -38,37 +40,8 @@ def get_best_n_matches(target, descriptors, n=DESC_FILTER_TARGET):
     error = np.linalg.norm(diff, axis=1)
     return np.argpartition(error, n)[:n] # return UNSORTED n smallest error indices
 
-def get_transformation(A, B):
-    # Compute the centroids
-    centroid_A = np.mean(A, axis=1)
-    centroid_B = np.mean(B, axis=1)
 
-    # Center the points by subtracting the centroids
-    A_centered = A - centroid_A[:, np.newaxis]
-    B_centered = B - centroid_B[:, np.newaxis]
-
-    # Compute the covariance matrix H
-    H = B_centered @ A_centered.T
-
-    # Perform SVD
-    U, S, Vt = np.linalg.svd(H)
-    R = Vt.T @ U.T
-
-    # Ensure a proper rotation matrix by correcting for reflection
-    if np.linalg.det(R) < 0:
-        Vt[2, :] *= -1
-        R = Vt.T @ U.T
-
-    # Compute the translation vector
-    t = centroid_A - R @ centroid_B
-    return R, t
-
-
-def 
-
-def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples):
-    # create NUM_SAMPLES spin images to act as our ransac point pool
-    # compute descriptors
+def get_candidate_pairs(pc1_full, pc1_samples, pc2_full, pc2_samples):
     options = geomproc.spin_image_options()
     desc1 = geomproc.spin_images(pc1_samples, pc1_full, options)
     desc2 = geomproc.spin_images(pc2_samples, pc2_full, options)
@@ -82,27 +55,62 @@ def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples):
         candidate_ix = random.randint(0, matches.shape[0]-1)
         candidate_pairs.append([target_ix, matches[candidate_ix], 0])
 
-    rot, trans = geomproc.transformation_from_correspondences(pc1_samples, pc2_samples, np.array(candidate_pairs))
+    return candidate_pairs
 
-    # orig = np.zeros((3,3))
-    # source = np.zeros((3,3))
-    # transformed = np.zeros((3,3))
-    # for i in range(3):
-    #     orig[i] = np.array(pc1_samples.point[candidate_pairs[i][0]])
-    #     src = pc2_samples.point[candidate_pairs[i][1]]
-    #     source[i] = np.array(src)
-    #     transformed[i] =  np.array(((rot @ src).reshape(3, 1) + trans).reshape(1, 3))
-    #     # print((rot @ src).reshape(3, 1) + trans)
+def compute_errors(originalpc, transformed_points):
+    result = []
+    tree = geomproc.kdtree.KDTree(originalpc.point.tolist(), np.arange(originalpc.point.shape[0]).tolist())
+    for i, trpoint in enumerate(transformed_points):
+        [[ogpoint, ogix]] = tree.nn_query(trpoint)
+        dist = np.linalg.norm((ogpoint - trpoint))
+        # print(ogpoint, "   ", trpoint)
+        result.append([ogix, i, dist])
+    return np.array(result)
 
-    # print(orig)
-    # print(source)
-    # print(transformed)
-    # # print(trans)
-    # # print(source)
+def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples, iterations=RANSAC_ITERATIONS):
+    best_rot = np.identity(3)
+    best_trans = np.zeros((3, 1))
+    best_inlier_count = 0
+    for i in range(iterations):
+        candidate_pairs = get_candidate_pairs(pc1_full, pc1_samples, pc2_full, pc2_samples)
+        rot, trans = geomproc.transformation_from_correspondences(pc1_samples, pc2_samples, np.array(candidate_pairs))
+        transformed_points = geomproc.apply_transformation(pc2_samples.point, rot, trans)
+        errors = compute_errors(pc1_samples, transformed_points)
+        inlier_indices = np.where(errors[:,2] < EPSILON)[0]
+        if inlier_indices.shape[0] > best_inlier_count:
+            best_rot = rot
+            best_trans = trans
+            best_inlier_count = inlier_indices.shape[0]
+            # recompute rot, trans for inliers
+
+
+    return best_rot, best_trans
+
+
+def main():
+
+    rot = np.identity(3)
+    # trans = np.array([0.5, 0.5, 0.5]).reshape((3, 1))
+    trans = np.zeros((3, 1))
+
+    mesh1 = geomproc.load("../GeomProc/meshes/bunny.obj")
+    mesh1.normalize()
+    mesh1.compute_connectivity()
+    mesh2 = mesh1.copy()
+    mesh1.compute_vertex_and_face_normals()
+    # mesh2.vertex = geomproc.apply_transformation(mesh1.vertex, rot, trans)
+    mesh2.compute_vertex_and_face_normals()
+
+    pc1 = mesh1.sample(NUM_FULL_SAMPLES)
+    pc2 = mesh2.sample(NUM_FULL_SAMPLES)
+    pc1_samples = mesh1.sample(NUM_SAMPLES)
+    pc2_samples = mesh2.sample(NUM_SAMPLES)
+
+    align_rot, align_trans = ransac_align(pc1, pc1_samples, pc2, pc2_samples)
+    # align_rot, align_trans = ransac_align(pc1, pc1_samples, pc1.copy(), pc1_samples.copy())
 
     # pt1 = geomproc.create_points(orig, color=[1, 0, 0])
     # pt2 = geomproc.create_points(source, color=[0, 1, 0])
-    # pt3 = geomproc.create_points(transformed, color=[0, 0, 1])
     # # Combine everything together
     # result = geomproc.mesh()
     # result.append(pt1)
@@ -112,29 +120,6 @@ def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples):
     # wo = geomproc.write_options()
     # wo.write_vertex_colors = True
     # result.save('output.obj', wo)
-    return rot, trans
-
-
-def main():
-
-    rot = np.identity(3)
-    trans = np.array([0.5, 0.5, 0.5]).reshape((3, 1))
-    # trans = np.zeros((3, 1))
-
-    mesh1 = geomproc.load("../GeomProc/meshes/bunny.obj")
-    mesh1.normalize()
-    mesh1.compute_connectivity()
-    mesh2 = mesh1.copy()
-    mesh1.compute_vertex_and_face_normals()
-    mesh2.vertex = geomproc.apply_transformation(mesh1.vertex, rot, trans)
-    mesh2.compute_vertex_and_face_normals()
-
-    pc1 = mesh1.sample(NUM_FULL_SAMPLES)
-    pc2 = mesh2.sample(NUM_FULL_SAMPLES)
-    pc1_samples = mesh1.sample(NUM_SAMPLES)
-    pc2_samples = mesh2.sample(NUM_SAMPLES)
-
-    align_rot, align_trans = ransac_align(pc1, pc1_samples, pc2, pc2_samples)
     print("RANSAC")
     print(align_rot, align_trans)
 
