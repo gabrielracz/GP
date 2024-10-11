@@ -38,6 +38,33 @@ def get_best_n_matches(target, descriptors, n=DESC_FILTER_TARGET):
     error = np.linalg.norm(diff, axis=1)
     return np.argpartition(error, n)[:n] # return UNSORTED n smallest error indices
 
+def get_transformation(A, B):
+    # Compute the centroids
+    centroid_A = np.mean(A, axis=1)
+    centroid_B = np.mean(B, axis=1)
+
+    # Center the points by subtracting the centroids
+    A_centered = A - centroid_A[:, np.newaxis]
+    B_centered = B - centroid_B[:, np.newaxis]
+
+    # Compute the covariance matrix H
+    H = B_centered @ A_centered.T
+
+    # Perform SVD
+    U, S, Vt = np.linalg.svd(H)
+    R = Vt.T @ U.T
+
+    # Ensure a proper rotation matrix by correcting for reflection
+    if np.linalg.det(R) < 0:
+        Vt[2, :] *= -1
+        R = Vt.T @ U.T
+
+    # Compute the translation vector
+    t = centroid_A - R @ centroid_B
+    return R, t
+
+
+def 
 
 def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples):
     # create NUM_SAMPLES spin images to act as our ransac point pool
@@ -55,28 +82,44 @@ def ransac_align(pc1_full, pc1_samples, pc2_full, pc2_samples):
         candidate_ix = random.randint(0, matches.shape[0]-1)
         candidate_pairs.append([target_ix, matches[candidate_ix], 0])
 
-    # target_points = (pc1_samples.point[candidate_pairs[0][0]], 
-    #                       pc1_samples.point[candidate_pairs[1][0]],
-    #                       pc1_samples.point[candidate_pairs[2][0]])
-    # source_points = (pc2_samples.point[candidate_pairs[0][1]], 
-    #                  pc2_samples.point[candidate_pairs[1][1]],
-    #                  pc2_samples.point[candidate_pairs[2][1]])
-
-    # # C = AB-1
-    # A = create_local_basis(target_points)
-    # B = create_local_basis(source_points)
-
-    # C, error = np.linalg.lstsq(A, B, rcond=None)[:2]
-    print(candidate_pairs)
     rot, trans = geomproc.transformation_from_correspondences(pc1_samples, pc2_samples, np.array(candidate_pairs))
+
+    # orig = np.zeros((3,3))
+    # source = np.zeros((3,3))
+    # transformed = np.zeros((3,3))
+    # for i in range(3):
+    #     orig[i] = np.array(pc1_samples.point[candidate_pairs[i][0]])
+    #     src = pc2_samples.point[candidate_pairs[i][1]]
+    #     source[i] = np.array(src)
+    #     transformed[i] =  np.array(((rot @ src).reshape(3, 1) + trans).reshape(1, 3))
+    #     # print((rot @ src).reshape(3, 1) + trans)
+
+    # print(orig)
+    # print(source)
+    # print(transformed)
+    # # print(trans)
+    # # print(source)
+
+    # pt1 = geomproc.create_points(orig, color=[1, 0, 0])
+    # pt2 = geomproc.create_points(source, color=[0, 1, 0])
+    # pt3 = geomproc.create_points(transformed, color=[0, 0, 1])
+    # # Combine everything together
+    # result = geomproc.mesh()
+    # result.append(pt1)
+    # result.append(pt2)
+    # result.append(pt3)
+    # # Save the mesh
+    # wo = geomproc.write_options()
+    # wo.write_vertex_colors = True
+    # result.save('output.obj', wo)
     return rot, trans
 
 
 def main():
 
     rot = np.identity(3)
-    # trans = np.array([0.5, 0.5, 0.5]).reshape((3, 1))
-    trans = np.zeros((3, 1))
+    trans = np.array([0.5, 0.5, 0.5]).reshape((3, 1))
+    # trans = np.zeros((3, 1))
 
     mesh1 = geomproc.load("../GeomProc/meshes/bunny.obj")
     mesh1.normalize()
