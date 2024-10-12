@@ -1,0 +1,21 @@
+v1.7.0 2024/09/03: Added several bug fixes.
+
+v1.6.0 2023/08/10: Added support for ply files.
+                   Improved support for quad meshes.
+                   Added example of LSCM method.
+                   Fixes to shortest paths in graph and added interpolation demo.
+                   Added functions for creating superquadrics and supertoroids.
+
+v1.5.0 2023/07/24: Added mesh memory allocation method.
+
+v1.4.0 2023/06/01: Fixed cylinder scaling in create_lines.
+
+v1.3.0 2023/05/25: Added option to load and save quad meshes.
+
+v1.2.0 2023/05/25: Added array of colors option for create_lines and
+                   create_vectors.
+
+v1.1.0 2022/07/25: Added some bug fixes.
+
+v1.0.0 2021/04/30: First version of library assembled from existing
+                   code.
