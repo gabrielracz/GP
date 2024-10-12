@@ -1,0 +1,3 @@
+align_perfect.obj - same, 200 inliers
+align_simple.obj - 200sub, 5000ful, 5desc, 1000iters, 0.1 err: 92 inliers
+align_noise.obj - same, 69 inliers

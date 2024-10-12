@@ -6,7 +6,7 @@ import random
 
 PC_SUB_SAMPLES = 200 
 FULL_PC_SAMPLES = 5000 
-DESC_FILTER_TARGET = 10
+DESC_FILTER_TARGET = 5
 RANSAC_ITERATIONS = 1000
 INLIER_ERROR_THRESHOLD =0.1
 
@@ -24,10 +24,10 @@ def save_points(p1, p2=[], p3=[], filename=""):
     wo.write_vertex_colors = True
     result.save(filename, wo)
 
-def random_transform():
+def random_transform(translate_scale=1.0):
     rnd = np.random.random((3, 3))
     [q, r] = np.linalg.qr(rnd)
-    return q, np.random.random((3, 1)) * 5
+    return q, np.random.random((3, 1)) * translate_scale
 
 def get_best_n_matches(target, descriptors, n=DESC_FILTER_TARGET):
     target = target[:, None].T # make row vec
@@ -72,7 +72,9 @@ def ransac_align(target_pc, target_sampled, source_pc, source_sampled, iteration
     best_rot = np.identity(3)
     best_trans = np.zeros((3, 1))
     best_inlier_count = 0
+    print("Computing descriptors...")
     target_desc, source_desc = compute_descriptors(target_pc, target_sampled, source_pc, source_sampled)
+    print(f"RANSAC {iterations}")
     for i in range(iterations):
         if i % 10 == 0:
             print(i)
@@ -92,7 +94,7 @@ def ransac_align(target_pc, target_sampled, source_pc, source_sampled, iteration
 
 
 def main():
-    rot, trans = random_transform()
+    rot, trans = random_transform(2)
 
     target_mesh = geomproc.load("../GeomProc/meshes/bunny.obj")
     target_mesh.normalize()
@@ -103,17 +105,33 @@ def main():
 
     target_pc         = target_mesh.sample(FULL_PC_SAMPLES)
     target_sampled    = target_mesh.sample(PC_SUB_SAMPLES)
-    source_pc         = source_mesh.sample(FULL_PC_SAMPLES)
-    source_sampled    = source_mesh.sample(PC_SUB_SAMPLES)
 
-    align_rot, align_trans = ransac_align(target_pc, target_sampled, source_pc, source_sampled)
+    EVAL = 2
+    if EVAL == 0:
+        source_pc = target_pc.copy()
+        source_sampled = target_sampled.copy()
+        source_pc.point = geomproc.apply_transformation(source_pc.point, rot, trans)
+        source_sampled.point = geomproc.apply_transformation(source_sampled.point, rot, trans)
+        # fix normals after transformation
+        source_pc.estimate_normals(k=10)
+        source_sampled.estimate_normals(k=10)
+    elif EVAL == 1:
+        source_pc         = source_mesh.sample(FULL_PC_SAMPLES)
+        source_sampled    = source_mesh.sample(PC_SUB_SAMPLES)
+    elif EVAL == 2:
+        source_mesh.add_noise(0.2)
+        source_mesh.compute_vertex_and_face_normals() # recompute normals
+        source_pc         = source_mesh.sample(FULL_PC_SAMPLES)
+        source_sampled    = source_mesh.sample(PC_SUB_SAMPLES)
+
+
+    align_rot, align_trans = ransac_align(target_pc, target_sampled, source_pc, source_sampled, RANSAC_ITERATIONS)
 
     save_points(target_pc.point,
                 geomproc.apply_transformation(source_pc.point, align_rot, align_trans),
                 source_pc.point,
-                "output.obj")
+                "outputs/output.obj")
 
-    print("RANSAC")
     print("TARGET TRANSFORM:")
     print("rotation:")
     print(rot)
@@ -127,4 +145,5 @@ def main():
     print(align_trans)
 
 if __name__ == "__main__":
+
     main()
